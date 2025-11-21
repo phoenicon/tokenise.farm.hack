@@ -1,0 +1,359 @@
+
+# Tokenise.Farm – Tokenised Farm Liquidity on Hedera
+
+> **Protecting fields, not chasing yields.**  
+> A low-risk, Hedera-powered DeFi protocol that helps farmers unlock liquidity from their land
+> while keeping ownership, using ultra-conservative (max 25%) collateralisation and real-world
+> tokenisation.
+
+---
+
+## 1. TL;DR
+
+- Farmers are land-rich but cash-poor and often forced to sell or over-leverage their farms.  
+- **MyBitcoin.Farm** uses **Hedera** to:
+  - Tokenise a portion of farm value as on-chain assets.
+  - Enforce a **25% max collateralisation** rule at the protocol level.
+  - Give savers/investors access to **real-world, yield-bearing farm exposure**.
+- Result: farmers keep their land, get cash flow; depositors get low-risk, transparent yield.
+
+This project is built for the **Hedera Hello Future: Ascension 2025 – DeFi & Tokenization track**.
+
+---
+
+## 2. Problem
+
+Traditional finance pushes farmers into:
+
+- High-interest loans and complex legal structures.
+- Forced sales to pay down debt or inheritance tax.
+- Opaque, slow and paperwork-heavy processes.
+
+At the same time:
+
+- Savers are looking for **lower-risk** yield.
+- ESG-minded investors want **real-world impact** (food security, soil health, local jobs).
+- There is **no simple way** to get verifiable farm exposure with transparent risk limits.
+
+---
+
+## 3. Solution
+
+**MyBitcoin.Farm** is a protocol + reference dApp that:
+
+1. **Tokenises a farm** into two main classes of on-chain assets:
+   - `FARM_EQUITY` – non-transferable, held by the farmer (ownership, governance).
+   - `FARM_NOTE` – limited-supply debt/claim tokens sold to supporters / investors.
+
+2. **Locks a maximum of 25% of the farm’s appraised value** into the on-chain financing pool.  
+   - This cap is enforced by a smart contract + policy rules.
+   - Even in extreme drawdowns, farmer ownership is preserved.
+
+3. **Routes capital** to the farmer in a transparent way:
+   - Investors deposit stable assets (e.g. HBAR, stablecoins, wBTC or tokenised gold – depending
+     on integration) into the protocol.
+   - The protocol mints and distributes `FARM_NOTE` to them.
+   - Interest / revenue share is streamed back as on-chain payments.
+
+4. **Stores key legal and sustainability data** on Hedera:
+   - Land parcel IDs, valuation proofs, legal agreements (hashed).
+   - Optional integration with **Hedera Guardian** for soil / carbon / biodiversity data.
+
+---
+
+## 4. Key Features (Hackathon MVP Scope)
+
+For Ascension we target a focused MVP:
+
+- 🧩 **Farm Token Factory (HTS)**
+  - Create and configure `FARM_EQUITY` and `FARM_NOTE` tokens.
+  - Parameterised by farm valuation and max 25% collateral limit.
+
+- 🏦 **Farm Vault Smart Contract (EVM)**
+  - Holds investor deposits and enforces:
+    - 25% max collateralisation.
+    - Mint/burn logic for `FARM_NOTE`.
+    - Simple interest / revenue-share distribution.
+
+- 📊 **Farmer + Supporter Dashboard (dApp)**
+  - Farmer view:
+    - See current collateral ratio, outstanding notes, runway.
+  - Supporter view:
+    - See farm story, metrics, APR range (non-guaranteed), risk flags.
+
+- 🧾 **Verifiable Data Layer (HCS)**
+  - Append-only log of:
+    - Token operations.
+    - Valuation updates.
+    - Governance events (e.g. community votes, debt restructuring).
+
+- 🌱 (Optional stretch) **Sustainability Hooks**
+  - Basic template to plug in Guardian-style sustainability data at the farm level.
+
+---
+
+## 5. Why Hedera?
+
+Hedera is a perfect fit for MyBitcoin.Farm because:
+
+- **Low, predictable fees** → micropayments for interest streams, updates and small farms.
+- **High throughput** → supports many farms + investors without congestion.
+- **Carbon-negative & ESG-friendly** → aligns with sustainable agriculture.
+- **HTS + HCS + EVM** → gives us tokenisation, audit trail and programmable logic in one stack.
+
+---
+
+## 6. System Architecture
+
+### 6.1 High-Level Overview
+
+```text
+           +-----------------------+
+           |   Farmer Interface    |
+           |  (Web dApp / Mobile)  |
+           +-----------+-----------+
+                       |
+                       v
+                [ API / Backend ]
+                       |
+        +--------------+----------------------+
+        |                                     |
+        v                                     v
++---------------+                    +-----------------+
+| Hedera Token  |                    | Hedera Smart    |
+| Service (HTS) |                    | Contracts (EVM) |
++-------+-------+                    +--------+--------+
+        |                                       |
+        |                                       |
+        v                                       v
++------------------+                  +------------------+
+| FARM_EQUITY      |                  | Farm Vault       |
+| FARM_NOTE tokens |                  | (collateral,     |
+| (per farm)       |                  | payouts, limits) |
++------------------+                  +------------------+
+
+        ^
+        |
++-------+--------+
+| Hedera Consensus|
+| Service (HCS)   |
++-----------------+
+        ^
+        |
++------------------+
+| Valuation oracle |
+| & off-chain data |
++------------------+
+
+        ^
+        |
++-------+--------+
+|  Supporter /   |
+|  Investor dApp |
++----------------+
+````
+
+### 6.2 Mermaid Diagram (for GitHub rendering)
+
+```mermaid
+graph TD
+
+  subgraph Clients
+    F[Farmer dApp]
+    I[Investor dApp]
+  end
+
+  subgraph Backend
+    B[API / Orchestrator]
+    O[Valuation & Off-chain Data Oracles]
+  end
+
+  subgraph Hedera
+    HTS[Hedera Token Service<br/>FARM_EQUITY & FARM_NOTE]
+    HCS[Hedera Consensus Service<br/>Audit Log]
+    SC[Smart Contract Service<br/>Farm Vault]
+  end
+
+  F --> B
+  I --> B
+
+  B --> HTS
+  B --> SC
+  B --> HCS
+
+  O --> B
+  O --> HCS
+
+  SC --> HTS
+  SC --> HCS
+```
+
+### 6.3 Core Flows
+
+#### 1) Farm Onboarding
+
+1. Farmer submits data: location, valuation, documents (off-chain, hashed).
+2. Backend:
+
+   * Stores hashed docs.
+   * Calls HTS to create `FARM_EQUITY` and `FARM_NOTE`.
+   * Deploys / configures Farm Vault contract with:
+
+     * Farm valuation.
+     * 25% maximum collateral parameter.
+3. HCS logs an immutable “FarmOnboarded” event.
+
+#### 2) Investor Deposit & Token Minting
+
+1. Investor selects a farm, approves deposit of HBAR/stable asset.
+2. Vault contract:
+
+   * Checks new collateral ratio doesn’t exceed 25%.
+   * Mints `FARM_NOTE` tokens to the investor.
+   * Emits events (mirrored via HCS).
+
+#### 3) Payouts & Exit
+
+1. Farm generates revenue (off-chain for MVP; simulated in dApp).
+2. Farmer or protocol triggers payout:
+
+   * Contract distributes funds pro-rata to `FARM_NOTE` holders.
+3. Investors can:
+
+   * Hold the notes.
+   * Redeem/burn them for underlying value when farm repays.
+
+---
+
+## 7. Tech Stack
+
+* **Protocol & Chain**
+
+  * Hedera Hashgraph
+  * Hedera Token Service (HTS)
+  * Hedera Consensus Service (HCS)
+  * Hedera Smart Contract Service (EVM compatible)
+
+* **Smart Contracts**
+
+  * Solidity (Farm Vault, Farm Factory)
+
+* **Backend / API**
+
+  * Node.js / TypeScript (planned)
+  * Hedera JS/TS SDK
+
+* **Frontend**
+
+  * React / Next.js (or similar)
+  * WalletConnect / HashPack integration (TBD)
+
+---
+
+## 8. Getting Started (MVP Plan)
+
+> ⚠️ This section will be updated as implementation progresses during the hackathon.
+
+### 8.1 Prerequisites
+
+* Node.js 20+
+* pnpm / yarn / npm
+* MetaMask / HashPack (for testnet)
+* Hedera testnet account + funds
+
+### 8.2 Installation
+
+```bash
+git clone https://github.com/<your-username>/mybitcoin-farm.git
+cd mybitcoin-farm
+
+# Install root dependencies (if using monorepo, adjust to /frontend /contracts etc.)
+npm install
+```
+
+### 8.3 Environment
+
+Create `.env` (or `.env.local`) with:
+
+```bash
+HEDERA_NETWORK=testnet
+OPERATOR_ID=0.0.xxxxx
+OPERATOR_KEY=302e0201...
+JSON_RPC_ENDPOINT=https://testnet.hashio.io/api
+```
+
+*(Add any other keys as contracts & APIs are wired up.)*
+
+---
+
+## 9. Project Status (for Hackathon)
+
+* ✅ Concept, architecture & token model.
+* ✅ Hedera integration plan (HTS + HCS + EVM).
+* 🔄 In progress:
+
+  * Farm Vault smart contract.
+  * Token factory scripts.
+  * Basic dApp UI (Farmer + Investor).
+* 🎯 Hackathon deliverables:
+
+  * Smart contract + test deployment on Hedera testnet.
+  * Minimal functional dApp flow:
+
+    * Onboard a demo farm.
+    * Allow a “supporter” wallet to deposit and receive `FARM_NOTE`.
+  * Pitch deck + demo video.
+
+---
+
+## 10. How This Meets Ascension Judging Criteria
+
+* **Innovation (10%)**
+
+  * Conservative 25% collateral cap & real-world farm focus = distinct RWA model.
+
+* **Visibility / Clarity (10%)**
+
+  * Simple dashboards for both farmers & supporters.
+
+* **Execution (20%)**
+
+  * Working Hedera testnet demo showcasing HTS + smart contracts.
+
+* **Integration (15%)**
+
+  * Uses Hedera Token Service, Consensus Service, and EVM contracts.
+
+* **Validation (15%)**
+
+  * Real problem: farmers’ liquidity / inheritance tax pressure.
+  * Clear personas: Farmer, Supporter, Protocol Operator.
+
+* **Success / Impact (20%)**
+
+  * Scalable across many farms & jurisdictions.
+  * Enables ESG-aligned yield and food-system resilience.
+
+* **Pitch (10%)**
+
+  * Narrative: “Save farms, not just yields.”
+  * Clear story from farmer pain → Hedera-powered solution.
+
+---
+
+## 11. Roadmap (Beyond the Hackathon)
+
+* Integrate **Guardian** for carbon/ESG metrics per farm.
+* Add **stablecoin rails** and tokenised BTC/gold baskets.
+* Build a **farmer co-op governance layer** (DAO-like, but practical).
+* Add secondary markets for FARM_NOTE trading with strong compliance rules.
+* Expand into other real-world assets (orchards, vineyards, regenerative projects).
+
+---
+
+## 12. License
+
+TBD – likely MIT or Apache-2.0 for hackathon purposes.
+
+
+
