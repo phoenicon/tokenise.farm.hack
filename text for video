@@ -1,0 +1,23 @@
+🎥 Demo Video Description 
+
+Tokenise.Farm — 30 Second Demo
+
+This video walks through the core MVP flow built during the Hedera Ascension Hackathon:
+
+Farm Onboarding Wizard
+A simple multi-step UI where a farmer enters their property details (hectares, location, estimated value).
+
+25% Safe Collateral Model
+The system calculates the maximum safe tokenisation limit using a conservative 25% LTV rule developed for farmland safety.
+
+Hedera Token Creation
+The backend uses Hedera HTS to mint a new fungible token representing the farm-backed collateral.
+(1 token = £1 for the MVP.)
+
+Success Screen + Token ID
+The app displays a confirmation showing the newly created token ID and supply allocation.
+
+Dashboard & Summary
+The farmer can see their minted supply and metadata in a clean dashboard layout.
+
+This demonstrates the complete tokenisation journey from land input → collateral modelling → HTS mint → confirmation.
