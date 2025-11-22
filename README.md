@@ -1,8 +1,6 @@
-# ✅ **README.md (Full Submission Version)**
+ **Tokenise.Farm — Unlock Farm Liquidity Without Selling**
 
-# **Tokenise.Farm — Unlock Farm Liquidity Without Selling**
-
-### *A Hedera-powered Real-World Asset (RWA) Tokenisation Platform*
+ *A Hedera-powered Real-World Asset (RWA) Tokenisation Platform*
 
 Built for **Hedera Hello Future: Ascension Hackathon 2025**
 
