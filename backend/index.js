@@ -21,7 +21,7 @@ if (!process.env.OPERATOR_ID || !process.env.OPERATOR_KEY) {
 }
 
 const operatorId = AccountId.fromString(process.env.OPERATOR_ID);
-const operatorKey = PrivateKey.fromString(process.env.OPERATOR_KEY);
+const operatorKey = PrivateKey.fromStringECDSA(process.env.OPERATOR_KEY);
 const network = process.env.HEDERA_NETWORK || "testnet";
 
 const client = Client.forName(network);
