@@ -1,5 +1,5 @@
 {
-  "name": "tokenise-farm-backend",
+  "name": "tokenise-farm-hack-backend",
   "version": "0.1.0",
   "description": "Backend API for Tokenise.Farm — Hedera RWA demo",
   "main": "index.js",
