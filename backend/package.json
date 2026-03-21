@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "description": "Backend API for Tokenise.Farm – Hedera RWA demo",
   "main": "index.js",
-  "scripts": {
-    "dev": "node index.js"
-  },
+  ""scripts": {
+  "start": "node index.js",
+  "dev": "node index.js"
+}
   "dependencies": {
     "@hashgraph/sdk": "^2.47.0",
     "cors": "^2.8.5",
