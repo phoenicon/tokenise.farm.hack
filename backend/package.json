@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Backend API for Tokenise.Farm – Hedera RWA demo",
   "main": "index.js",
-  ""scripts": {
+  "scripts": {
   "start": "node index.js",
   "dev": "node index.js"
 }
