@@ -9,6 +9,7 @@ const {
   AccountId,
   PrivateKey,
   TokenCreateTransaction,
+  TokenMintTransaction,
   TokenType,
   TokenSupplyType
 } = require("@hashgraph/sdk");
@@ -131,9 +132,9 @@ app.post("/api/farms/:id/tokenise", async (req, res) => {
     }
 
     // 1 token = £1 for this MVP
-    const initialSupply = BigInt(farm.maxSafeTokenisationGBP);
+    const totalSupply = Number(farm.maxSafeTokenisationGBP);
 
-    console.log(`[HTS] Creating token for farm ${farm.id} with supply ${initialSupply.toString()}`);
+    console.log(`[HTS] Creating token for farm ${farm.id} with supply ${totalSupply}`);
 
     const tokenName = farm.tokenName || `${farm.name} Token`;
     const tokenSymbol = farm.tokenSymbol || "FARM";
@@ -143,8 +144,9 @@ app.post("/api/farms/:id/tokenise", async (req, res) => {
       .setTokenSymbol(tokenSymbol)
       .setTokenType(TokenType.FungibleCommon)
       .setSupplyType(TokenSupplyType.Finite)
-      .setInitialSupply(Number(initialSupply))   // SDK expects number for now
-      .setMaxSupply(Number(initialSupply))
+      .setInitialSupply(0)
+      .setMaxSupply(totalSupply)
+      .setSupplyKey(operatorKey.publicKey)
       .setTreasuryAccountId(operatorId)          // treasury = operator for MVP
       .freezeWith(client);
 
@@ -155,6 +157,14 @@ app.post("/api/farms/:id/tokenise", async (req, res) => {
 
     const mintedTokenId = receipt.tokenId.toString();
     console.log(`[HTS] Created tokenId ${mintedTokenId} for farm ${farm.id}`);
+
+    const mintTx = new TokenMintTransaction()
+      .setTokenId(mintedTokenId)
+      .setAmount(totalSupply)
+      .freezeWith(client);
+    const signedMintTx = await mintTx.sign(operatorKey);
+    await signedMintTx.execute(client);
+    console.log("Minted tokens to treasury:", mintedTokenId);
 
     farm.tokenId = mintedTokenId;
     farm.status = "tokenised";
