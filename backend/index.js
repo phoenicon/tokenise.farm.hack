@@ -10,6 +10,8 @@ const {
   TokenType,
   TokenSupplyType
 } = require("@hashgraph/sdk");
+const { scheduleCollateralCheck } = require("./src/utils/scheduleCollateralCheck");
+const { ensureAuditTopic, submitAuditMessage } = require("./src/utils/hcsAudit");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -64,40 +66,35 @@ app.get("/api/farms", (req, res) => {
   res.json({ farms });
 });
 
+// Get a single farm by id
+app.get("/api/farms/:id", (req, res) => {
+  const farm = farms.find(f => f.id === req.params.id);
+  if (!farm) {
+    return res.status(404).json({ error: "Farm not found" });
+  }
+  return res.json({ farm });
+});
+
 // Register a new farm and compute 25% safe collateral
 app.post("/api/farms", (req, res) => {
   try {
-    const { name, location, hectares, estimatedValueGBP, tokenSymbol, tokenName } = req.body;
-
-    if (!name || !location || !estimatedValueGBP) {
+    if (!req.body.name || !req.body.location || !req.body.estimatedValueGBP) {
       return res.status(400).json({ error: "name, location, estimatedValueGBP are required" });
     }
 
-    const safe25 = Math.round(Number(estimatedValueGBP) * 0.25);
-
-    const idBase = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
-    let id = idBase || `farm-${farms.length + 1}`;
-    let n = 1;
-    while (farms.find(f => f.id === id)) {
-      id = `${idBase}-${n++}`;
-    }
-
     const farm = {
-      id,
-      name,
-      location,
-      hectares: Number(hectares || 0),
-      estimatedValueGBP: Number(estimatedValueGBP),
-      maxSafeTokenisationGBP: safe25,
-      tokenSymbol: tokenSymbol || "FARM",
-      tokenName: tokenName || `${name} Token`,
-      tokenId: null,
+      id: req.body.name,
+      name: req.body.name,
+      location: req.body.location,
+      hectares: req.body.hectares,
+      estimatedValueGBP: req.body.estimatedValueGBP,
+      maxSafeTokenisationGBP: req.body.estimatedValueGBP * 0.25,
       status: "registered"
     };
 
     farms.push(farm);
 
-    return res.status(201).json({ farm });
+    return res.json({ farm });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to register farm" });
@@ -123,9 +120,12 @@ app.post("/api/farms/:id/tokenise", async (req, res) => {
 
     console.log(`[HTS] Creating token for farm ${farm.id} with supply ${initialSupply.toString()}`);
 
+    const tokenName = farm.tokenName || `${farm.name} Token`;
+    const tokenSymbol = farm.tokenSymbol || "FARM";
+
     const tx = new TokenCreateTransaction()
-      .setTokenName(farm.tokenName)
-      .setTokenSymbol(farm.tokenSymbol)
+      .setTokenName(tokenName)
+      .setTokenSymbol(tokenSymbol)
       .setTokenType(TokenType.FungibleCommon)
       .setSupplyType(TokenSupplyType.Finite)
       .setInitialSupply(Number(initialSupply))   // SDK expects number for now
@@ -135,15 +135,61 @@ app.post("/api/farms/:id/tokenise", async (req, res) => {
 
     const signedTx = await tx.sign(operatorKey);
     const resp = await signedTx.execute(client);
+    const txId = resp.transactionId.toString();
     const receipt = await resp.getReceipt(client);
 
-    const tokenId = receipt.tokenId.toString();
-    console.log(`[HTS] Created tokenId ${tokenId} for farm ${farm.id}`);
+    const mintedTokenId = receipt.tokenId.toString();
+    console.log(`[HTS] Created tokenId ${mintedTokenId} for farm ${farm.id}`);
 
-    farm.tokenId = tokenId;
+    farm.tokenId = mintedTokenId;
     farm.status = "tokenised";
 
-    return res.json({ farm, tokenId });
+    let scheduleResult = { scheduleId: null, executionTime: null };
+    try {
+      scheduleResult = await scheduleCollateralCheck(
+        farm.id,
+        mintedTokenId,
+        0.0003 // ~30 seconds for demo
+      );
+    } catch (scheduleError) {
+      console.error("Collateral check scheduling failed:", scheduleError.message);
+    }
+
+    let hcsTopicId = null;
+    let hcsSequenceNumber = null;
+    let hcsRunningHash = null;
+    try {
+      const topicId = await ensureAuditTopic();
+      const estimatedValue = farm.estimatedValueGBP || farm.estimatedValue || null;
+      const auditPayload = {
+        event: "farm_tokenised",
+        farmId: farm.id,
+        tokenId: mintedTokenId,
+        txId,
+        ltvBps: 2500,
+        estimatedValueGBP: estimatedValue,
+        maxSafeLiquidityGBP: (estimatedValue || 0) * 0.25,
+        timestamp: new Date().toISOString()
+      };
+      const hcsResult = await submitAuditMessage(topicId, auditPayload);
+      hcsTopicId = hcsResult.topicId;
+      hcsSequenceNumber = hcsResult.sequenceNumber;
+      hcsRunningHash = hcsResult.runningHash;
+    } catch (hcsError) {
+      console.error("HCS audit failed:", hcsError.message);
+    }
+
+    return res.json({
+      success: true,
+      farm,
+      tokenId: mintedTokenId,
+      txId,
+      scheduleId: scheduleResult.scheduleId,
+      nextCheck: scheduleResult.executionTime,
+      hcsTopicId,
+      hcsSequenceNumber,
+      hcsRunningHash
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to tokenise farm", details: err.message });
