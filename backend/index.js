@@ -159,19 +159,22 @@ app.post("/api/farms/:id/tokenise", async (req, res) => {
     const mintedTokenId = receipt.tokenId.toString();
     console.log(`[HTS] Created tokenId ${mintedTokenId} for farm ${farm.id}`);
 
-    await new TokenAssociateTransaction()
+    const associateTx = await new TokenAssociateTransaction()
       .setAccountId(operatorId)
       .setTokenIds([mintedTokenId])
-      .freezeWith(client)
-      .sign(operatorKey)
-      .then(tx => tx.execute(client));
+      .freezeWith(client);
+    const signedAssociateTx = await associateTx.sign(operatorKey);
+    const associateSubmit = await signedAssociateTx.execute(client);
+    await associateSubmit.getReceipt(client);
 
-    await new TokenMintTransaction()
+    const mintTx = await new TokenMintTransaction()
       .setTokenId(mintedTokenId)
       .setAmount(totalSupply)
-      .freezeWith(client)
-      .sign(operatorKey)
-      .then(tx => tx.execute(client));
+      .freezeWith(client);
+    const signedMintTx = await mintTx.sign(operatorKey);
+    const mintSubmit = await signedMintTx.execute(client);
+    const mintReceipt = await mintSubmit.getReceipt(client);
+    console.log("Mint receipt status:", mintReceipt.status.toString());
     console.log("Minted tokens to treasury:", mintedTokenId);
 
     farm.tokenId = mintedTokenId;
