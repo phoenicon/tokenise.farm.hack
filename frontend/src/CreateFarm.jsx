@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://tokenise-farm-hack.onrender.com";
+const API_BASE = "https://tokenise-farm-hack.onrender.com";
 
 const postJson = async (url, payload) => {
   const res = await fetch(url, {
@@ -54,22 +54,9 @@ export default function CreateFarm() {
     setError("");
 
     try {
-      const { farmId, createData, tokeniseData } = await createAndTokeniseFarm(formData);
-      const farmFromApi = tokeniseData?.farm || createData?.farm || {};
-      const farmForSession = {
-        id: farmId,
-        ...farmFromApi,
-        tokenId: tokeniseData?.tokenId || farmFromApi?.tokenId || null,
-        txId: tokeniseData?.txId || null,
-        scheduleId: tokeniseData?.scheduleId || null,
-        nextCheck: tokeniseData?.nextCheck || null,
-        hcsTopicId: tokeniseData?.hcsTopicId || null,
-        hcsSequenceNumber: tokeniseData?.hcsSequenceNumber || null,
-        hcsRunningHash: tokeniseData?.hcsRunningHash || null
-      };
-
-      sessionStorage.setItem("farm", JSON.stringify(farmForSession));
-      window.location.href = "/dashboard";
+      const { farmId } = await createAndTokeniseFarm(formData);
+      sessionStorage.setItem("farm", JSON.stringify({ id: farmId }));
+      window.location.href = `/dashboard?id=${farmId}`;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {

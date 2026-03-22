@@ -2,6 +2,8 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
+const fs = require("fs");
+const path = require("path");
 const {
   Client,
   AccountId,
@@ -15,19 +17,22 @@ const { ensureAuditTopic, submitAuditMessage } = require("./src/utils/hcsAudit")
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const DATA_FILE = path.join(__dirname, "farms.json");
 
 // -------- Hedera client setup --------
 
-if (!process.env.OPERATOR_ID || !process.env.OPERATOR_KEY) {
+const hasOperatorCredentials = Boolean(process.env.OPERATOR_ID && process.env.OPERATOR_KEY);
+if (!hasOperatorCredentials) {
   console.warn("[WARN] OPERATOR_ID or OPERATOR_KEY missing from .env");
 }
 
-const operatorId = AccountId.fromString(process.env.OPERATOR_ID);
-const operatorKey = PrivateKey.fromStringECDSA(process.env.OPERATOR_KEY);
 const network = process.env.HEDERA_NETWORK || "testnet";
-
-const client = Client.forName(network);
-client.setOperator(operatorId, operatorKey);
+const operatorId = hasOperatorCredentials ? AccountId.fromString(process.env.OPERATOR_ID) : null;
+const operatorKey = hasOperatorCredentials ? PrivateKey.fromStringECDSA(process.env.OPERATOR_KEY) : null;
+const client = hasOperatorCredentials ? Client.forName(network) : null;
+if (client && operatorId && operatorKey) {
+  client.setOperator(operatorId, operatorKey);
+}
 
 // -------- In-memory farm store (MVP) --------
 
@@ -47,7 +52,12 @@ client.setOperator(operatorId, operatorKey);
  * }
  */
 
-const farms = [];
+let farms = [];
+
+if (fs.existsSync(DATA_FILE)) {
+  const raw = fs.readFileSync(DATA_FILE, "utf8");
+  farms = JSON.parse(raw);
+}
 
 // -------- Express middleware --------
 
@@ -93,6 +103,7 @@ app.post("/api/farms", (req, res) => {
     };
 
     farms.push(farm);
+    fs.writeFileSync(DATA_FILE, JSON.stringify(farms, null, 2));
 
     return res.json({ farm });
   } catch (err) {
@@ -104,6 +115,10 @@ app.post("/api/farms", (req, res) => {
 // Tokenise a farm: create HTS fungible token on Hedera
 app.post("/api/farms/:id/tokenise", async (req, res) => {
   try {
+    if (!hasOperatorCredentials || !client || !operatorId || !operatorKey) {
+      return res.status(500).json({ error: "Backend not configured: missing OPERATOR_ID/OPERATOR_KEY" });
+    }
+
     const farmId = req.params.id;
     const farm = farms.find(f => f.id === farmId);
 
@@ -143,6 +158,8 @@ app.post("/api/farms/:id/tokenise", async (req, res) => {
 
     farm.tokenId = mintedTokenId;
     farm.status = "tokenised";
+    farm.mintedAt = new Date().toISOString();
+    fs.writeFileSync(DATA_FILE, JSON.stringify(farms, null, 2));
 
     let scheduleResult = { scheduleId: null, executionTime: null };
     try {

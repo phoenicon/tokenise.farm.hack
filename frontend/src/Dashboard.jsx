@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://tokenise-farm-hack.onrender.com";
+const API_BASE = "https://tokenise-farm-hack.onrender.com";
 
 export default function Dashboard() {
   const [farmId, setFarmId] = useState("");
@@ -11,26 +11,13 @@ export default function Dashboard() {
   useEffect(() => {
     const loadFarm = async () => {
       const stored = sessionStorage.getItem("farm");
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          console.log("Loaded from sessionStorage:", parsed);
-          setFarm(parsed);
-          setFarmId(parsed.id || "");
-          setError("");
-          setLoading(false);
-          return;
-        } catch (err) {
-          console.error("Failed to parse session farm:", err);
-        }
-      }
-
+      const parsed = stored ? JSON.parse(stored) : null;
       const params = new URLSearchParams(window.location.search);
-      const idFromUrl = params.get("id");
+      const idFromUrl = params.get("id") || parsed?.id;
       setFarmId(idFromUrl || "");
 
       if (!idFromUrl) {
-        setError("Session expired — please create a farm again.");
+        setError("Missing farm ID — please create a farm again.");
         setLoading(false);
         return;
       }
@@ -45,11 +32,11 @@ export default function Dashboard() {
         if (res.ok && data?.farm) {
           setFarm(data.farm);
         } else {
-          setError("Session expired — please create a farm again.");
+          setError("Farm not found — please create a farm again.");
         }
       } catch (err) {
         console.error("Fetch failed:", err);
-        setError("Session expired — please create a farm again.");
+        setError("Failed to load farm data.");
       } finally {
         setLoading(false);
       }
@@ -100,12 +87,6 @@ export default function Dashboard() {
         <p style={{ color: "#166534", margin: 0 }}>Success: farm tokenised and ready for demo.</p>
         <p style={{ margin: "6px 0 0 0" }}>Token ID: {farm.tokenId || "N/A"}</p>
         <p style={{ margin: "6px 0 0 0" }}>Max liquidity: GBP {farm.maxSafeTokenisationGBP ?? "N/A"}</p>
-        {farm?.nextCheck && (
-          <p style={{ margin: "6px 0 0 0" }}>
-            ⏱ Next automatic collateral check:{" "}
-            {new Date(farm.nextCheck).toLocaleString()}
-          </p>
-        )}
       </div>
       <p>name: {farm.name}</p>
       <p>location: {farm.location}</p>
@@ -114,19 +95,15 @@ export default function Dashboard() {
       <p>maxSafeTokenisationGBP: {farm.maxSafeTokenisationGBP}</p>
       <p>tokenId: {farm.tokenId || "N/A"}</p>
       <p>txId: {farm.txId || "N/A"}</p>
-      <p>scheduleId: {farm.scheduleId || "N/A"}</p>
       <p>status: {farm.status}</p>
-
-      {farm?.hcsTopicId && (
-        <div style={{ border: "1px solid #94a3b8", background: "#f8fafc", padding: "12px", marginTop: "12px" }}>
-          <h3 style={{ marginTop: 0 }}>Audit Trail</h3>
-          <p>Topic ID: {farm.hcsTopicId}</p>
-          <p>Sequence Number: {farm.hcsSequenceNumber || "N/A"}</p>
-          <p>Running Hash: {farm.hcsRunningHash || "N/A"}</p>
-          <p style={{ display: "inline-block", padding: "4px 8px", background: "#e2e8f0", borderRadius: "999px" }}>
-            Immutable audit trail recorded on Hedera Consensus Service
-          </p>
-        </div>
+      {farm.mintedAt && (
+        <p>Minted At: {new Date(farm.mintedAt).toLocaleString()}</p>
+      )}
+      {farm.nextCheck && (
+        <p>
+          ⏱ Next automatic collateral check:{" "}
+          {new Date(farm.nextCheck).toLocaleString()}
+        </p>
       )}
 
       {farm.tokenId && (
@@ -136,6 +113,20 @@ export default function Dashboard() {
           </a>
         </p>
       )}
+
+      {farm.hcsTopicId && (
+        <div style={{ marginTop: "20px" }}>
+          <h3>Audit Trail (HCS)</h3>
+          <p>Topic ID: {farm.hcsTopicId}</p>
+          <p>Sequence: {farm.hcsSequenceNumber}</p>
+          <p>Running Hash: {farm.hcsRunningHash}</p>
+          <p style={{ color: "green" }}>
+            Immutable audit trail recorded on Hedera
+          </p>
+        </div>
+      )}
+
+      <pre>{JSON.stringify(farm, null, 2)}</pre>
     </div>
   );
 }
