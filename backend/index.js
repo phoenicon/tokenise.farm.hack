@@ -2,8 +2,10 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
-const fs = require("fs");
+const fs = require("fs/promises");
 const path = require("path");
+const { v4: uuidv4 } = require("uuid");
+const rateLimit = require("express-rate-limit");
 const {
   Client,
   AccountId,
@@ -20,21 +22,20 @@ const { ensureAuditTopic, submitAuditMessage } = require("./src/utils/hcsAudit")
 const app = express();
 const PORT = process.env.PORT || 4000;
 const DATA_FILE = path.join(__dirname, "farms.json");
+const LTV_RATIO = parseFloat(process.env.LTV_RATIO || "0.25");
 
 // -------- Hedera client setup --------
 
-const hasOperatorCredentials = Boolean(process.env.OPERATOR_ID && process.env.OPERATOR_KEY);
-if (!hasOperatorCredentials) {
-  console.warn("[WARN] OPERATOR_ID or OPERATOR_KEY missing from .env");
+if (!process.env.OPERATOR_ID || !process.env.OPERATOR_KEY) {
+  console.error("[FATAL] OPERATOR_ID and OPERATOR_KEY must be set in .env");
+  process.exit(1);
 }
 
 const network = process.env.HEDERA_NETWORK || "testnet";
-const operatorId = hasOperatorCredentials ? AccountId.fromString(process.env.OPERATOR_ID) : null;
-const operatorKey = hasOperatorCredentials ? PrivateKey.fromStringECDSA(process.env.OPERATOR_KEY) : null;
-const client = hasOperatorCredentials ? Client.forName(network) : null;
-if (client && operatorId && operatorKey) {
-  client.setOperator(operatorId, operatorKey);
-}
+const operatorId = AccountId.fromString(process.env.OPERATOR_ID);
+const operatorKey = PrivateKey.fromStringECDSA(process.env.OPERATOR_KEY);
+const client = Client.forName(network);
+client.setOperator(operatorId, operatorKey);
 
 // -------- In-memory farm store (MVP) --------
 
@@ -56,16 +57,65 @@ if (client && operatorId && operatorKey) {
 
 let farms = [];
 
-if (fs.existsSync(DATA_FILE)) {
-  const raw = fs.readFileSync(DATA_FILE, "utf8");
-  farms = JSON.parse(raw);
+async function loadFarms() {
+  try {
+    const raw = await fs.readFile(DATA_FILE, "utf8");
+    farms = JSON.parse(raw);
+  } catch {
+    farms = [];
+  }
+}
+
+async function saveFarms() {
+  await fs.writeFile(DATA_FILE, JSON.stringify(farms, null, 2));
+}
+
+// -------- Input validation helpers --------
+
+function validateString(value, name, { minLength = 1, maxLength = 200 } = {}) {
+  if (typeof value !== "string") {
+    return `${name} must be a string`;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length < minLength) {
+    return `${name} must be at least ${minLength} character(s)`;
+  }
+  if (trimmed.length > maxLength) {
+    return `${name} must be at most ${maxLength} characters`;
+  }
+  return null;
+}
+
+function validatePositiveNumber(value, name, { min = 0, max = Infinity } = {}) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    return `${name} must be a number`;
+  }
+  if (num <= min) {
+    return `${name} must be greater than ${min}`;
+  }
+  if (num > max) {
+    return `${name} must be at most ${max}`;
+  }
+  return null;
 }
 
 // -------- Express middleware --------
 
-app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || "http://localhost:5173"
+}));
 app.use(express.json());
 app.use(morgan("dev"));
+
+// Rate limit tokenise endpoint to prevent account fund exhaustion
+const tokeniseLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many tokenise requests — please wait a moment and try again." }
+});
 
 // -------- Routes --------
 
@@ -87,25 +137,34 @@ app.get("/api/farms/:id", (req, res) => {
   return res.json({ farm });
 });
 
-// Register a new farm and compute 25% safe collateral
-app.post("/api/farms", (req, res) => {
+// Register a new farm and compute safe collateral
+app.post("/api/farms", async (req, res) => {
   try {
-    if (!req.body.name || !req.body.location || !req.body.estimatedValueGBP) {
-      return res.status(400).json({ error: "name, location, estimatedValueGBP are required" });
+    const errors = [
+      validateString(req.body.name, "name", { maxLength: 100 }),
+      validateString(req.body.location, "location", { maxLength: 100 }),
+      validatePositiveNumber(req.body.estimatedValueGBP, "estimatedValueGBP", { min: 0, max: 5e8 }),
+      req.body.hectares != null
+        ? validatePositiveNumber(req.body.hectares, "hectares", { min: 0, max: 100000 })
+        : null
+    ].filter(Boolean);
+
+    if (errors.length > 0) {
+      return res.status(400).json({ error: errors.join("; ") });
     }
 
     const farm = {
-      id: req.body.name,
-      name: req.body.name,
-      location: req.body.location,
-      hectares: req.body.hectares,
-      estimatedValueGBP: req.body.estimatedValueGBP,
-      maxSafeTokenisationGBP: req.body.estimatedValueGBP * 0.25,
+      id: uuidv4(),
+      name: req.body.name.trim(),
+      location: req.body.location.trim(),
+      hectares: req.body.hectares != null ? Number(req.body.hectares) : null,
+      estimatedValueGBP: Number(req.body.estimatedValueGBP),
+      maxSafeTokenisationGBP: Number(req.body.estimatedValueGBP) * LTV_RATIO,
       status: "registered"
     };
 
     farms.push(farm);
-    fs.writeFileSync(DATA_FILE, JSON.stringify(farms, null, 2));
+    await saveFarms();
 
     return res.json({ farm });
   } catch (err) {
@@ -115,12 +174,8 @@ app.post("/api/farms", (req, res) => {
 });
 
 // Tokenise a farm: create HTS fungible token on Hedera
-app.post("/api/farms/:id/tokenise", async (req, res) => {
+app.post("/api/farms/:id/tokenise", tokeniseLimiter, async (req, res) => {
   try {
-    if (!hasOperatorCredentials || !client || !operatorId || !operatorKey) {
-      return res.status(500).json({ error: "Backend not configured: missing OPERATOR_ID/OPERATOR_KEY" });
-    }
-
     const farmId = req.params.id;
     const farm = farms.find(f => f.id === farmId);
 
@@ -180,45 +235,53 @@ app.post("/api/farms/:id/tokenise", async (req, res) => {
     farm.tokenId = mintedTokenId;
     farm.status = "tokenised";
     farm.mintedAt = new Date().toISOString();
-    fs.writeFileSync(DATA_FILE, JSON.stringify(farms, null, 2));
+    await saveFarms();
+
+    const warnings = [];
 
     let scheduleResult = { scheduleId: null, executionTime: null };
     try {
       scheduleResult = await scheduleCollateralCheck(
+        client,
+        operatorId,
+        operatorKey,
         farm.id,
         mintedTokenId,
         0.0003 // ~30 seconds for demo
       );
     } catch (scheduleError) {
       console.error("Collateral check scheduling failed:", scheduleError.message);
+      warnings.push("Collateral check could not be scheduled — please retry.");
     }
 
     let hcsTopicId = null;
     let hcsSequenceNumber = null;
     let hcsRunningHash = null;
     try {
-      const topicId = await ensureAuditTopic();
-      const estimatedValue = farm.estimatedValueGBP || farm.estimatedValue || null;
+      const topicId = await ensureAuditTopic(client);
+      const estimatedValue = farm.estimatedValueGBP || null;
       const auditPayload = {
         event: "farm_tokenised",
         farmId: farm.id,
         tokenId: mintedTokenId,
         txId,
-        ltvBps: 2500,
+        ltvBps: Math.round(LTV_RATIO * 10000),
         estimatedValueGBP: estimatedValue,
-        maxSafeLiquidityGBP: (estimatedValue || 0) * 0.25,
+        maxSafeLiquidityGBP: (estimatedValue || 0) * LTV_RATIO,
         timestamp: new Date().toISOString()
       };
-      const hcsResult = await submitAuditMessage(topicId, auditPayload);
+      const hcsResult = await submitAuditMessage(client, topicId, auditPayload);
       hcsTopicId = hcsResult.topicId;
       hcsSequenceNumber = hcsResult.sequenceNumber;
       hcsRunningHash = hcsResult.runningHash;
     } catch (hcsError) {
       console.error("HCS audit failed:", hcsError.message);
+      warnings.push("HCS audit trail could not be recorded — please retry.");
     }
 
     return res.json({
       success: true,
+      ...(warnings.length > 0 && { warnings }),
       farm,
       tokenId: mintedTokenId,
       txId,
@@ -241,6 +304,8 @@ app.use((req, res) => {
 
 // -------- Start server --------
 
-app.listen(PORT, () => {
-  console.log(`🚀 Tokenise.Farm backend listening on http://localhost:${PORT}`);
+loadFarms().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀 Tokenise.Farm backend listening on http://localhost:${PORT}`);
+  });
 });

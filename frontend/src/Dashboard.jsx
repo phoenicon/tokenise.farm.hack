@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const API_BASE = "https://tokenise-farm-hack.onrender.com";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
 export default function Dashboard() {
   const [farmId, setFarmId] = useState("");
@@ -24,19 +24,27 @@ export default function Dashboard() {
 
       try {
         setError("");
-        console.log("Fetching:", `${API_BASE}/api/farms/${idFromUrl}`);
-        const res = await fetch(`${API_BASE}/api/farms/${idFromUrl}`);
-        const data = await res.json().catch(() => ({}));
-        console.log("Response status:", res.status);
-        console.log("Response data:", data);
-        if (res.ok && data?.farm) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        let res;
+        try {
+          res = await fetch(`${API_BASE}/api/farms/${idFromUrl}`, { signal: controller.signal });
+        } finally {
+          clearTimeout(timeoutId);
+        }
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || `Server error (HTTP ${res.status})`);
+        }
+        const data = await res.json();
+        if (data?.farm) {
           setFarm(data.farm);
         } else {
           setError("Farm not found — please create a farm again.");
         }
       } catch (err) {
         console.error("Fetch failed:", err);
-        setError("Failed to load farm data.");
+        setError(err.name === "AbortError" ? "Request timed out — please try again." : `Failed to load farm: ${err.message}`);
       } finally {
         setLoading(false);
       }

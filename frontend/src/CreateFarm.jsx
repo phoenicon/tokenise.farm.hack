@@ -1,19 +1,25 @@
 import { useState } from "react";
 
-const API_BASE = "https://tokenise-farm-hack.onrender.com";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
 const postJson = async (url, payload) => {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data.error || "Request failed");
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `Request failed (HTTP ${res.status})`);
+    }
+    return data;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return data;
 };
 
 const createAndTokeniseFarm = async (formData) => {
